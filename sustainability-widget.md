@@ -1,0 +1,453 @@
+layout: page
+title: "Sustainability widget"
+permalink: /sustainability-widget
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MIT Research on the SDGs (2020–2026)</title>
+  <style>
+
+    /* ============================================================
+       STYLING
+    ============================================================ */
+
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 750px;
+      margin: 40px auto;
+      padding: 0 20px;
+      background: #f4f4f4;
+    }
+
+    h2 { color: #A31F34; }
+
+    p.intro { color: #555; font-size: 0.95em; }
+
+    .card {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+
+    .card-title a {
+      font-size: 1.05em;
+      font-weight: bold;
+      color: #1a1a1a;
+      text-decoration: none;
+    }
+
+    .card-title a:hover {
+      text-decoration: underline;
+      color: #A31F34;
+    }
+
+    .source-badge {
+      display: inline-block;
+      background: #A31F34;
+      color: white;
+      padding: 2px 9px;
+      border-radius: 4px;
+      font-size: 0.75em;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    .meta { color: #777; font-size: 0.82em; margin-top: 7px; }
+
+    .summary {
+      font-size: 0.88em;
+      color: #444;
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+
+    #status { color: #888; font-style: italic; }
+
+    button {
+      background: #A31F34;
+      color: white;
+      border: none;
+      padding: 9px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 0.95em;
+      margin-bottom: 20px;
+    }
+
+    button:hover { background: #8a1a2c; }
+
+    /* Small warning note explaining the date limitation */
+    .limitation-note {
+      background: #fff8e1;
+      border-left: 4px solid #f0c040;
+      padding: 10px 14px;
+      font-size: 0.85em;
+      color: #555;
+      margin-bottom: 20px;
+      border-radius: 0 6px 6px 0;
+    }
+
+  </style>
+</head>
+<body>
+
+  <h2>🌍 MIT Research on Sustainable Development Goals (2020–2026)</h2>
+
+  <p class="intro">
+    Showing 5 randomly selected works from <strong>DSpace@MIT</strong>
+    published between 2020 and 2026, related to the Sustainable Development Goals.
+    Refresh the page or click the button for a new set.
+  </p>
+
+  <!--
+    NOTE TO FUTURE EDITORS:
+    The date range filtering below is done in JavaScript, not by TIMDEX.
+    TIMDEX does not currently offer a server-side date filter parameter.
+    If TIMDEX adds one in the future, this can be simplified significantly.
+  -->
+  <div class="limitation-note">
+    ⚠️ <strong>Note:</strong> TIMDEX does not support server-side date filtering,
+    so date range filtering (2020–2026) is applied here in the browser after
+    results are received. This may require a few extra API calls to find enough
+    qualifying results.
+  </div>
+
+  <button onclick="loadSources()">🔄 Show Different Sources</button>
+
+  <div id="results">
+    <p id="status">Loading sources...</p>
+  </div>
+
+
+  <script>
+
+    // ============================================================
+    // CONFIGURATION
+    // Adjust these values to change what the tool searches for.
+    // ============================================================
+
+    const API_URL      = "https://timdex.mit.edu/graphql";
+    const SEARCH_TERM  = "Sustainability OR Climate OR pollution";
+    const SOURCE       = "dspace@mit";
+
+    const YEAR_MIN     = 2020;   // Earliest publication year to include
+    const YEAR_MAX     = 2026;   // Latest publication year to include
+
+    const FETCH_SIZE   = 30;     // Records to request per API call
+                                 // (larger = more candidates, fewer retries needed)
+    const DISPLAY_SIZE = 5;      // How many to show on the page
+    const MAX_ATTEMPTS = 20;     // Give up after this many fetch attempts
+                                 // (prevents infinite loops if few results match)
+
+
+    // ============================================================
+    // STEP 1: BUILD THE GRAPHQL QUERY
+    //
+    // We request both `publicationDate` (a simple string, though
+    // marked deprecated) and `dates` (the full structured date array)
+    // so we have two chances to find a valid year on each record.
+    // ============================================================
+
+    function buildQuery(startingPosition) {
+      return {
+        query: `{
+          search(
+            searchterm: "${SEARCH_TERM}",
+            sourceFilter: ["${SOURCE}"],
+            from: "${startingPosition}"
+          ) {
+            hits
+            records {
+              title
+              sourceLink
+              source
+              publicationDate
+              dates {
+                kind
+                value
+              }
+              summary
+              contributors {
+                value
+                kind
+              }
+            }
+          }
+        }`
+      };
+    }
+
+
+    // ============================================================
+    // STEP 2: SEND THE QUERY TO TIMDEX
+    // ============================================================
+
+    async function askTIMDEX(startingPosition) {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildQuery(startingPosition))
+      });
+
+      const json = await response.json();
+
+      if (json.errors) {
+        throw new Error(json.errors[0].message);
+      }
+
+      return json.data.search; // { hits: Number, records: [...] }
+    }
+
+
+    // ============================================================
+    // STEP 3: EXTRACT A PUBLICATION YEAR FROM A RECORD
+    //
+    // TIMDEX returns date information in two ways:
+    //
+    //   a) publicationDate — a deprecated but still-populated String
+    //      field, e.g. "2023" or "2022-05-15"
+    //
+    //   b) dates — a structured array of date objects, each with:
+    //        kind  (e.g. "Publication Date", "Issued", "Accessioned")
+    //        value (a string like "2021-09-01")
+    //
+    // We try (a) first because it's simpler. If it's missing or
+    // unparseable, we fall back to (b) and look through the dates
+    // array for any entry that has a readable 4-digit year.
+    //
+    // Why extract just the year and not the full date?
+    // Because date formats in library records are inconsistent —
+    // some records say "2023", others say "2023-05", others say
+    // "2023-05-15". Extracting just the first 4 characters (the year)
+    // works reliably across all these formats.
+    // ============================================================
+
+    function extractYear(record) {
+
+      // --- Try publicationDate first (simplest) ---
+      if (record.publicationDate) {
+        const year = parseInt(record.publicationDate.substring(0, 4));
+        if (!isNaN(year) && year > 1000) return year; // Sanity check: must be a real year
+      }
+
+      // --- Fall back to the dates array ---
+      if (record.dates && record.dates.length > 0) {
+
+        // First pass: look specifically for a date labeled as a publication date
+        for (const date of record.dates) {
+          const kindLower = (date.kind || "").toLowerCase();
+          if (
+            date.value &&
+            (kindLower.includes("publication") || kindLower.includes("issued"))
+          ) {
+            const year = parseInt(date.value.substring(0, 4));
+            if (!isNaN(year) && year > 1000) return year;
+          }
+        }
+
+        // Second pass: just take the first date entry we can parse
+        // (better than returning nothing)
+        for (const date of record.dates) {
+          if (date.value) {
+            const year = parseInt(date.value.substring(0, 4));
+            if (!isNaN(year) && year > 1000) return year;
+          }
+        }
+      }
+
+      // No usable date found on this record
+      return null;
+    }
+
+
+    // ============================================================
+    // STEP 4: CHECK IF A RECORD FALLS WITHIN OUR DATE RANGE
+    //
+    // Returns true only if the record has a year we can read
+    // AND that year is between YEAR_MIN and YEAR_MAX.
+    // Records with no parseable date are excluded (return false).
+    // ============================================================
+
+    function isWithinDateRange(record) {
+      const year = extractYear(record);
+      if (year === null) return false;         // No date → exclude
+      return year >= YEAR_MIN && year <= YEAR_MAX;
+    }
+
+
+    // ============================================================
+    // STEP 5: SHUFFLE AN ARRAY RANDOMLY (Fisher-Yates algorithm)
+    // ============================================================
+
+    function shuffle(array) {
+      const copy = [...array];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    }
+
+
+    // ============================================================
+    // STEP 6: THE MAIN FUNCTION
+    //
+    // Plan:
+    //   a) First call → get total number of DSpace@MIT SDG results
+    //   b) Loop: pick a random start, fetch a batch, filter by date
+    //   c) Collect qualifying records until we have at least 5
+    //      (or give up after MAX_ATTEMPTS tries)
+    //   d) Shuffle the pool, pick 5, display them
+    // ============================================================
+
+    async function loadSources() {
+
+      document.getElementById("results").innerHTML =
+        `<p id="status">Searching DSpace@MIT for ${YEAR_MIN}–${YEAR_MAX} SDG results…</p>`;
+
+      try {
+
+        // --- a) First call: get the total number of matching records ---
+
+        const firstResponse = await askTIMDEX(0);
+        const totalResults  = firstResponse.hits;
+
+        if (totalResults === 0) {
+          document.getElementById("results").innerHTML =
+            `<p>No results found for "${SEARCH_TERM}" in ${SOURCE}.</p>`;
+          return;
+        }
+
+        // Update the status message so the user sees progress
+        document.getElementById("status").textContent =
+          `Found ${totalResults.toLocaleString()} total results. Filtering for ${YEAR_MIN}–${YEAR_MAX}…`;
+
+        // --- b) Retry loop: fetch batches and filter by date ---
+
+        let qualifyingRecords = []; // Our growing pool of valid records
+        let attempts = 0;
+
+        while (qualifyingRecords.length < DISPLAY_SIZE && attempts < MAX_ATTEMPTS) {
+
+          // Pick a random start point, leaving enough room for a full batch
+          const maxStart   = Math.max(0, totalResults - FETCH_SIZE);
+          const randomStart = Math.floor(Math.random() * maxStart);
+
+          const response   = await askTIMDEX(randomStart);
+          const batch      = response.records;
+
+          // Keep only records whose publication year is within range
+          const inRange    = batch.filter(isWithinDateRange);
+
+          // Add them to our pool
+          qualifyingRecords = qualifyingRecords.concat(inRange);
+
+          attempts++;
+        }
+
+        // --- c) Did we find enough? ---
+
+        if (qualifyingRecords.length === 0) {
+          document.getElementById("results").innerHTML = `
+            <p>
+              No results from ${YEAR_MIN}–${YEAR_MAX} were found after
+              ${MAX_ATTEMPTS} attempts. Try broadening the search term or date range.
+            </p>`;
+          return;
+        }
+
+        // --- d) Remove duplicate titles, shuffle, and take 5 ---
+
+        const unique    = [...new Map(qualifyingRecords.map(r => [r.title, r])).values()];
+        const finalFive = shuffle(unique).slice(0, DISPLAY_SIZE);
+
+        displaySources(finalFive, totalResults, attempts);
+
+      } catch (error) {
+        document.getElementById("results").innerHTML =
+          `<p style="color:red;">
+            ⚠️ Something went wrong: <strong>${error.message}</strong>
+            <br>Please try refreshing.
+          </p>`;
+      }
+    }
+
+
+    // ============================================================
+    // STEP 7: BUILD AND DISPLAY THE SOURCE CARDS
+    // ============================================================
+
+    function displaySources(records, totalResults, attemptsTaken) {
+
+      const container = document.getElementById("results");
+
+      if (!records || records.length === 0) {
+        container.innerHTML = `<p>No sources to display. Please try refreshing.</p>`;
+        return;
+      }
+
+      const note = `
+        <p style="color:#888; font-size:0.85em; margin-bottom:16px;">
+          Randomly selected from works published ${YEAR_MIN}–${YEAR_MAX}
+          in DSpace@MIT (${totalResults.toLocaleString()} total SDG results searched
+          across ${attemptsTaken} request${attemptsTaken !== 1 ? "s" : ""}).
+        </p>`;
+
+      const cards = records.map(record => {
+
+        // --- Author names (up to 3, then "et al.") ---
+        let authorText = "Author not listed";
+        if (record.contributors && record.contributors.length > 0) {
+          const names    = record.contributors.map(c => c.value);
+          const shown    = names.slice(0, 3).join(", ");
+          const overflow = names.length > 3 ? " et al." : "";
+          authorText     = shown + overflow;
+        }
+
+        // --- Publication year ---
+        const year = extractYear(record);
+        const yearText = year ? `📅 ${year}` : "Date not available";
+
+        // --- Summary (first 300 characters) ---
+        let summaryHTML = "";
+        if (record.summary && record.summary.length > 0) {
+          const text    = record.summary[0];
+          const trimmed = text.length > 300 ? text.slice(0, 300) + "…" : text;
+          summaryHTML   = `<p class="summary">${trimmed}</p>`;
+        }
+
+        return `
+          <div class="card">
+            <div class="card-title">
+              <a href="${record.sourceLink}" target="_blank" rel="noopener noreferrer">
+                ${record.title}
+              </a>
+            </div>
+            <div class="meta">
+              <span class="source-badge">${record.source}</span>
+              👤 ${authorText}
+            </div>
+            <div class="meta">${yearText}</div>
+            ${summaryHTML}
+          </div>
+        `;
+      });
+
+      container.innerHTML = note + cards.join("");
+    }
+
+
+    // ============================================================
+    // RUN on page load
+    // ============================================================
+    loadSources();
+
+  </script>
+
+</body>
+</html>
