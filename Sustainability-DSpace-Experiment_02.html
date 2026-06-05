@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>MIT Research on the SDGs (2020–2026)</title>
+  <title>MIT Research on climate change and sustainability (2020–2026)</title>
   <style>
 
     /* ============================================================
@@ -294,7 +294,7 @@
     // STEP 6: THE MAIN FUNCTION
     //
     // Plan:
-    //   a) First call → get total number of DSpace@MIT SDG results
+    //   a) First call → get total number of DSpace@MIT results
     //   b) Loop: pick a random start, fetch a batch, filter by date
     //   c) Collect qualifying records until we have at least 5
     //      (or give up after MAX_ATTEMPTS tries)
@@ -304,7 +304,7 @@
     async function loadSources() {
 
       document.getElementById("results").innerHTML =
-        `<p id="status">Searching DSpace@MIT for ${YEAR_MIN}–${YEAR_MAX} SDG results…</p>`;
+        `<p id="status">Searching DSpace@MIT for ${YEAR_MIN}–${YEAR_MAX} results…</p>`;
 
       try {
 
@@ -390,7 +390,7 @@
       const note = `
         <p style="color:#888; font-size:0.85em; margin-bottom:16px;">
           Randomly selected from works published ${YEAR_MIN}–${YEAR_MAX}
-          in DSpace@MIT (${totalResults.toLocaleString()} total SDG results searched
+          in DSpace@MIT (${totalResults.toLocaleString()} total results searched
           across ${attemptsTaken} request${attemptsTaken !== 1 ? "s" : ""}).
         </p>`;
 
